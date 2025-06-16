@@ -12,6 +12,10 @@ on:
         default: 'true'
         type: boolean
 
+permissions:
+  contents: write
+  packages: write
+
 jobs:
   build:
     strategy:
@@ -92,13 +96,10 @@ jobs:
         echo "Version: $VERSION"
         
     - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ steps.version.outputs.VERSION }}
-        release_name: File Filter ${{ steps.version.outputs.VERSION }}
+        name: File Filter ${{ steps.version.outputs.VERSION }}
         body: |
           ## File Filter Release ${{ steps.version.outputs.VERSION }}
           
@@ -142,34 +143,11 @@ jobs:
           - Model: DeepSeek-R1-0528-Qwen3-8B (4-bit quantized)
           - Size: ~4.6GB (included in release)
           - Language: Optimized for English text classification
+        files: |
+          file-filter-windows-x64/file-filter-windows-x64.zip
+          file-filter-linux-x64/file-filter-linux-x64.tar.gz
+          file-filter-macos-x64/file-filter-macos-x64.tar.gz
         draft: false
         prerelease: ${{ contains(steps.version.outputs.VERSION, 'dev-') }}
-        
-    - name: Upload Release Assets
-      run: |
-        # Upload Windows release
-        if [ -f "file-filter-windows-x64/file-filter-windows-x64.zip" ]; then
-          curl -X POST \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Content-Type: application/zip" \
-            --data-binary @"file-filter-windows-x64/file-filter-windows-x64.zip" \
-            "${{ steps.create_release.outputs.upload_url }}?name=file-filter-windows-x64.zip"
-        fi
-        
-        # Upload Linux release
-        if [ -f "file-filter-linux-x64/file-filter-linux-x64.tar.gz" ]; then
-          curl -X POST \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Content-Type: application/gzip" \
-            --data-binary @"file-filter-linux-x64/file-filter-linux-x64.tar.gz" \
-            "${{ steps.create_release.outputs.upload_url }}?name=file-filter-linux-x64.tar.gz"
-        fi
-        
-        # Upload macOS release
-        if [ -f "file-filter-macos-x64/file-filter-macos-x64.tar.gz" ]; then
-          curl -X POST \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Content-Type: application/gzip" \
-            --data-binary @"file-filter-macos-x64/file-filter-macos-x64.tar.gz" \
-            "${{ steps.create_release.outputs.upload_url }}?name=file-filter-macos-x64.tar.gz"
-        fi
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
