@@ -17,12 +17,7 @@ jobs:
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: '8.0.x'  # Using .NET 8 for better compatibility
-        
-    - name: Update project to .NET 8 (temporary)
-      run: |
-        (Get-Content file-filter.csproj) -replace 'net10.0', 'net8.0' | Set-Content file-filter.csproj
-      shell: powershell
+        dotnet-version: '10.0.x'  # Using .NET 10
         
     - name: Restore dependencies
       run: dotnet restore
