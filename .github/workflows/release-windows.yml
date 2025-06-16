@@ -1,0 +1,127 @@
+name: Build Windows Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Triggers on version tags like v1.0.0, v2.1.3, etc.
+  workflow_dispatch:  # Allows manual trigger
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'  # Using .NET 8 for better compatibility
+        
+    - name: Update project to .NET 8 (temporary)
+      run: |
+        (Get-Content file-filter.csproj) -replace 'net10.0', 'net8.0' | Set-Content file-filter.csproj
+      shell: powershell
+        
+    - name: Restore dependencies
+      run: dotnet restore
+      
+    - name: Build for Windows x64
+      run: |
+        dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o ./publish/win-x64
+        
+    - name: Test build
+      run: |
+        if (Test-Path "./publish/win-x64/file-filter.exe") {
+          Write-Host "✅ Build successful - executable found"
+          Get-ChildItem "./publish/win-x64/" | Format-Table
+        } else {
+          Write-Host "❌ Build failed - executable not found"
+          exit 1
+        }
+      shell: powershell
+        
+    - name: Create release archive
+      run: |
+        # Create zip for x64
+        Compress-Archive -Path "./publish/win-x64/*" -DestinationPath "./file-filter-windows-x64.zip" -Force
+        
+        # Verify archive was created
+        if (Test-Path "./file-filter-windows-x64.zip") {
+          $size = (Get-Item "./file-filter-windows-x64.zip").Length / 1MB
+          Write-Host "✅ Archive created successfully - Size: $([math]::Round($size, 2)) MB"
+        }
+      shell: powershell
+        
+    - name: Get version from tag or generate dev version
+      id: version
+      run: |
+        if ($env:GITHUB_REF -match "refs/tags/(.*)") {
+          $version = $matches[1]
+        } else {
+          $version = "dev-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+        }
+        echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+        echo "Version: $version"
+      shell: powershell
+      
+    - name: Create Release
+      id: create_release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.version.outputs.VERSION }}
+        name: File Filter ${{ steps.version.outputs.VERSION }}
+        body: |
+          ## 🤖 File Filter Release ${{ steps.version.outputs.VERSION }}
+          
+          AI-powered file content filtering tool using LLamaSharp and DeepSeek AI model.
+          
+          ### 🚀 Features
+          - Filter file contents using natural language prompts
+          - Powered by DeepSeek-R1-0528-Qwen3-8B model
+          - Command-line interface with flexible output options
+          - Self-contained executable - no dependencies required
+          
+          ### 📖 Usage
+          ```cmd
+          file-filter.exe <input-file> [-f "filter prompt"] [-o "output-file"]
+          ```
+          
+          ### 📋 Examples
+          ```cmd
+          REM Find all lines containing animals
+          file-filter.exe data.txt -f "Find all entries that include animals" -o animals.txt
+          
+          REM Find lines with colors (output to console)
+          file-filter.exe log.txt -f "Find entries mentioning colors"
+          
+          REM Process without specific filter (shows all processing)
+          file-filter.exe sample.txt
+          ```
+          
+          ### 💾 Installation
+          1. Download `file-filter-windows-x64.zip`
+          2. Extract to your preferred location
+          3. Run from command prompt or PowerShell
+          4. First run may take longer as the AI model initializes
+          
+          ### ⚡ System Requirements
+          - Windows 10 or later (x64)
+          - ~5GB free disk space (includes AI model)
+          - 8GB+ RAM recommended for optimal performance
+          
+          ### 🔧 Model Information
+          - **Model**: DeepSeek-R1-0528-Qwen3-8B (IQ4_XS quantized)
+          - **Size**: ~4.6GB (included in release)
+          - **Optimized for**: English text classification and filtering
+          
+          ---
+          
+          **Note**: This is a self-contained release including the AI model. No additional setup required!
+        files: |
+          file-filter-windows-x64.zip
+        draft: false
+        prerelease: ${{ contains(steps.version.outputs.VERSION, 'dev-') }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

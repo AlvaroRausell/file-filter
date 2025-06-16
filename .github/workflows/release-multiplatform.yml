@@ -1,0 +1,184 @@
+name: Build and Release (All Platforms)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Create a new release'
+        required: false
+        default: 'true'
+        type: boolean
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        include:
+          - os: windows-latest
+            runtime: win-x64
+            artifact_name: file-filter-windows-x64
+            executable_extension: .exe
+          - os: ubuntu-latest
+            runtime: linux-x64
+            artifact_name: file-filter-linux-x64
+            executable_extension: ''
+          - os: macos-latest
+            runtime: osx-x64
+            artifact_name: file-filter-macos-x64
+            executable_extension: ''
+    
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'  # Fallback to .NET 8 for broader compatibility
+        
+    - name: Update target framework (if needed)
+      run: |
+        if [ "${{ matrix.os }}" != "windows-latest" ]; then
+          sed -i 's/net10.0/net8.0/g' file-filter.csproj
+        else
+          powershell -Command "(Get-Content file-filter.csproj) -replace 'net10.0', 'net8.0' | Set-Content file-filter.csproj"
+        fi
+      shell: bash
+      
+    - name: Restore dependencies
+      run: dotnet restore
+      
+    - name: Build and Publish
+      run: |
+        dotnet publish -c Release -r ${{ matrix.runtime }} --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o ./publish
+        
+    - name: Create archive (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        Compress-Archive -Path "./publish/*" -DestinationPath "./${{ matrix.artifact_name }}.zip"
+      shell: powershell
+      
+    - name: Create archive (Unix)
+      if: matrix.os != 'windows-latest'
+      run: |
+        cd publish
+        tar -czf "../${{ matrix.artifact_name }}.tar.gz" *
+        cd ..
+        
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.artifact_name }}
+        path: |
+          ${{ matrix.artifact_name }}.zip
+          ${{ matrix.artifact_name }}.tar.gz
+        retention-days: 30
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.create_release == 'true')
+    
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      
+    - name: Get version
+      id: version
+      run: |
+        if [[ $GITHUB_REF == refs/tags/* ]]; then
+          VERSION=${GITHUB_REF#refs/tags/}
+        else
+          VERSION="dev-$(date +'%Y%m%d-%H%M%S')"
+        fi
+        echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+        echo "Version: $VERSION"
+        
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.version.outputs.VERSION }}
+        release_name: File Filter ${{ steps.version.outputs.VERSION }}
+        body: |
+          ## File Filter Release ${{ steps.version.outputs.VERSION }}
+          
+          🤖 AI-powered file content filtering tool using LLamaSharp and DeepSeek model.
+          
+          ### 🚀 Features
+          - Filter file contents using natural language prompts
+          - Powered by DeepSeek-R1 AI model
+          - Cross-platform support (Windows, Linux, macOS)
+          - Command-line interface with output file support
+          
+          ### 📖 Usage
+          ```bash
+          # Windows
+          file-filter.exe <input-file> [-f "filter prompt"] [-o "output-file"]
+          
+          # Linux/macOS
+          ./file-filter <input-file> [-f "filter prompt"] [-o "output-file"]
+          ```
+          
+          ### 📋 Examples
+          ```bash
+          # Find all lines containing animals
+          file-filter.exe data.txt -f "Find all entries that include animals" -o animals.txt
+          
+          # Find lines with colors
+          file-filter.exe log.txt -f "Find entries mentioning colors"
+          ```
+          
+          ### 💾 Downloads
+          Choose the appropriate version for your system:
+          - **Windows x64**: `file-filter-windows-x64.zip`
+          - **Linux x64**: `file-filter-linux-x64.tar.gz`
+          - **macOS x64**: `file-filter-macos-x64.tar.gz`
+          
+          ### ⚡ Requirements
+          - No additional dependencies required (self-contained)
+          - First run may take longer as the AI model initializes
+          
+          ### 🔧 Model Information
+          - Model: DeepSeek-R1-0528-Qwen3-8B (4-bit quantized)
+          - Size: ~4.6GB (included in release)
+          - Language: Optimized for English text classification
+        draft: false
+        prerelease: ${{ contains(steps.version.outputs.VERSION, 'dev-') }}
+        
+    - name: Upload Release Assets
+      run: |
+        # Upload Windows release
+        if [ -f "file-filter-windows-x64/file-filter-windows-x64.zip" ]; then
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Content-Type: application/zip" \
+            --data-binary @"file-filter-windows-x64/file-filter-windows-x64.zip" \
+            "${{ steps.create_release.outputs.upload_url }}?name=file-filter-windows-x64.zip"
+        fi
+        
+        # Upload Linux release
+        if [ -f "file-filter-linux-x64/file-filter-linux-x64.tar.gz" ]; then
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Content-Type: application/gzip" \
+            --data-binary @"file-filter-linux-x64/file-filter-linux-x64.tar.gz" \
+            "${{ steps.create_release.outputs.upload_url }}?name=file-filter-linux-x64.tar.gz"
+        fi
+        
+        # Upload macOS release
+        if [ -f "file-filter-macos-x64/file-filter-macos-x64.tar.gz" ]; then
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Content-Type: application/gzip" \
+            --data-binary @"file-filter-macos-x64/file-filter-macos-x64.tar.gz" \
+            "${{ steps.create_release.outputs.upload_url }}?name=file-filter-macos-x64.tar.gz"
+        fi
